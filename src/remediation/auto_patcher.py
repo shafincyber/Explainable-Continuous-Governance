@@ -93,7 +93,6 @@ resource "aws_iam_role_policy" "test_policy" {
   })
 }
 """
-    # This mandate comes directly from your regulatory_matrix.json -> Neo4j Graph
     strict_mandate = "Remove wildcard (*) resource permissions and explicitly scope access to specific Amazon Resource Names (ARNs) to satisfy GDPR least-privilege processor obligations."
     
     secure_code = patcher.generate_patch(

@@ -75,7 +75,6 @@ class LogMessage(BaseModel):
     message: str
 
 # --- ENDPOINTS ---
-
 @app.post("/api/v2/alert")
 async def trigger_alert(alert: AlertMessage, background_tasks: BackgroundTasks):
     background_tasks.add_task(send_chatops_alert, alert.trigger_id, alert.regulations, alert.status)

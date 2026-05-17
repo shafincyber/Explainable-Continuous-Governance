@@ -26,14 +26,58 @@ def emit_log(source, message):
         requests.post("http://localhost:8000/api/v2/log_sink", json={"source": source, "message": str(message)}, timeout=1.5)
     except Exception: pass
 
+def get_checkov_path():
+    import shutil
+    # 1. Primary: Check standard system PATH resolution
+    p = shutil.which('checkov')
+    if p: return p
+    
+    # 2. Secondary: Explicitly target the active Virtual Environment Scripts folder
+    venv_scripts = os.path.join(sys.prefix, 'Scripts')
+    for ext in ['.exe', '.cmd', '.bat', '']:
+        target = os.path.join(venv_scripts, f'checkov{ext}')
+        if os.path.exists(target):
+            return target
+            
+    return None
+
 def run_checkov_scan(target_dir):
     emit_log('audit', f"[*] Executing Deterministic Scanner (Checkov) on {target_dir}...")
     print(f"[*] Executing Deterministic Scanner (Checkov) on {target_dir}...")
     try:
-        result = subprocess.run(['checkov', '-d', target_dir, '-o', 'json', '--quiet'], capture_output=True, text=True, shell=True)
-        if not result.stdout: return []
+        checkov_exe = get_checkov_path()
+        
+        if not checkov_exe:
+            error_msg = f"[-] FATAL: Checkov executable is completely missing from the virtual environment ({sys.prefix}). Run: pip install checkov -I --no-cache-dir"
+            print(error_msg)
+            emit_log('audit', error_msg)
+            return []
 
-        report = json.loads(result.stdout)
+        # Execute the absolute binary path
+        cmd = f'"{checkov_exe}" -d "{target_dir}" -o json --quiet'
+        result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+        
+        if not result.stdout.strip():
+            error_msg = f"[-] Checkov execution failed. Stderr: {result.stderr.strip()}"
+            print(error_msg)
+            emit_log('audit', error_msg)
+            return []
+        
+        # Slices output to guarantee clean JSON parsing
+        output = result.stdout.strip()
+        json_start = output.find('{')
+        list_start = output.find('[')
+        
+        if json_start == -1 and list_start == -1:
+            error_msg = f"[-] Checkov did not output valid JSON: {output[:200]}"
+            print(error_msg)
+            emit_log('audit', error_msg)
+            return []
+            
+        start_idx = min(i for i in [json_start, list_start] if i > -1)
+        clean_json = output[start_idx:]
+
+        report = json.loads(clean_json)
         findings = []
         reports = report if isinstance(report, list) else [report]
         
@@ -46,7 +90,8 @@ def run_checkov_scan(target_dir):
         unique_findings = [dict(t) for t in {tuple(d.items()) for d in findings}]
         return unique_findings
     except Exception as e:
-        print(f"[-] Checkov Error: {e}")
+        print(f"[-] Checkov Runtime Error: {e}")
+        emit_log('audit', f"[-] Checkov Runtime Error: {e}")
         return []
 
 def run_semantic_scan(manifest_path):
@@ -133,11 +178,13 @@ def run_worker():
                     audit_report.extend(legal_context)
                     remediation_map[trigger] = legal_context
             
-            # Send the JSON payload straight to the dashboard UI
-            formatted_audit = json.dumps(audit_report, indent=2)
-            emit_log('audit', f"[+] Explainable Audit Generation Complete:\n{formatted_audit}")
-            print("[+] Explainable Audit Generation Complete:")
-            print(formatted_audit)
+            if audit_report:
+                formatted_audit = json.dumps(audit_report, indent=2)
+                emit_log('audit', f"[+] Explainable Audit Generation Complete:\n{formatted_audit}")
+                print("[+] Explainable Audit Generation Complete:")
+                print(formatted_audit)
+            else:
+                emit_log('audit', '[*] Technical vulnerabilities detected; initializing baseline mappings.')
         else:
             emit_log('audit', '[+] Pipeline secure. No compliance violations detected.')
             print("[+] Pipeline secure. No compliance violations detected.")
@@ -147,7 +194,6 @@ def run_worker():
             print("\n[*] --------------------------------------------------")
             print("[*] PHASE 4: Initiating Autonomous Remediation Engine...")
             
-            # Initialize the engine here
             patcher = SovereignRemediationEngine()
             
             for finding in checkov_findings:
@@ -155,35 +201,37 @@ def run_worker():
                 target_file = finding["file"]
                 legal_data = remediation_map.get(trigger_id)
                 
-                if legal_data and os.path.exists(target_file):
-                    reg_list = ", ".join(list(set([ctx.get("Regulation", "") for ctx in legal_data])))
+                if os.path.exists(target_file):
+                    # FALLBACK POLICY ENGINE
+                    if legal_data and len(legal_data) > 0:
+                        reg_list = ", ".join(list(set([ctx.get("Regulation", "") for ctx in legal_data])))
+                        remediation_mandate = legal_data[0].get("standard_remediation", "")
+                    else:
+                        reg_list = "Baseline Cyber-Hygiene (NIS2 Art 21 Policy)"
+                        remediation_mandate = f"Remediate infrastructure misconfiguration rule {trigger_id} by implementing strict secure defaults following industry-standard benchmark parameters."
+                    
                     emit_alert(trigger_id, reg_list, "VIOLATION_DETECTED")
-                    
                     emit_log('remediation', f"[*] Llama-3 rewriting {os.path.basename(target_file)} to enforce {reg_list}...")
+                    print(f"[*] Llama-3 rewriting {os.path.basename(target_file)} to enforce {reg_list}...")
                     
-                    # Read the vulnerable file content to pass into the engine
                     with open(target_file, 'r', encoding='utf-8') as tf_f:
                         vulnerable_code = tf_f.read()
                     
-                    # Extract the mandate string from the legal data mapping
-                    remediation_mandate = legal_data[0].get("Remediation", "")
-                    
-                    # Determine file extension/type (e.g., terraform)
                     file_type = "terraform" if target_file.endswith(".tf") else "yaml"
                     
-                    # Generate the patch using the updated engine instance
                     patched_code = patcher.generate_patch(vulnerable_code, file_type, remediation_mandate)
                     
-                    if patched_code:
-                        # Save the secure output
+                    if patched_code and patched_code.strip():
                         patched_filename = target_file.replace('.tf', '_patched.tf').replace('.yaml', '_patched.yaml')
                         with open(patched_filename, 'w', encoding='utf-8') as tf_f:
                             tf_f.write(patched_code)
                         
                         emit_log('remediation', f"[+] SUCCESS: {trigger_id} remediated. Code saved to {os.path.basename(patched_filename)}\n")
+                        print(f"[+] SUCCESS: {trigger_id} remediated. Code saved to {os.path.basename(patched_filename)}")
                         emit_alert(trigger_id, reg_list, "REMEDIATED")
                     else:
                         emit_log('remediation', f"[-] FAILURE: Could not generate patch for {trigger_id}\n")
+                        print(f"[-] FAILURE: Could not generate patch for {trigger_id}")
                     
             emit_log('remediation', '[*] --------------------------------------------------')
             print("[*] --------------------------------------------------")

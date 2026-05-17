@@ -45,6 +45,9 @@
             margin-bottom: 15px;
             text-transform: uppercase;
             letter-spacing: 1px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
         .log-stream {
             height: 400px;
@@ -63,6 +66,28 @@
             color: #000;
             font-weight: bold;
         }
+        .copy-btn {
+            background: transparent;
+            color: var(--text-main);
+            border: 1px solid var(--text-main);
+            cursor: pointer;
+            font-family: "Courier New", Courier, monospace;
+            padding: 2px 8px;
+            font-size: 0.8em;
+            transition: all 0.2s;
+        }
+        .copy-btn:hover {
+            background: var(--text-main);
+            color: #000;
+        }
+        .copy-btn.cyan-btn {
+            color: var(--accent-cyan);
+            border-color: var(--accent-cyan);
+        }
+        .copy-btn.cyan-btn:hover {
+            background: var(--accent-cyan);
+            color: #000;
+        }
         .blink { animation: blinker 1.5s linear infinite; }
         @keyframes blinker { 50% { opacity: 0; } }
         ::-webkit-scrollbar { width: 8px; }
@@ -78,11 +103,17 @@
     
     <div class="dashboard-grid">
         <div class="panel">
-            <div class="panel-header">// EVENT STREAM :: COMPLIANCE GRAPH</div>
+            <div class="panel-header">
+                <span>// EVENT STREAM :: COMPLIANCE GRAPH</span>
+                <button class="copy-btn" onclick="copyLogs('audit-logs')">[COPY LOGS]</button>
+            </div>
             <div class="log-stream" id="audit-logs"></div>
         </div>
         <div class="panel" style="border-color: var(--accent-cyan); background: rgba(0, 229, 255, 0.03);">
-            <div class="panel-header" style="color: var(--text-main);">// AUTONOMOUS REMEDIATION</div>
+            <div class="panel-header" style="color: var(--text-main);">
+                <span>// AUTONOMOUS REMEDIATION</span>
+                <button class="copy-btn cyan-btn" onclick="copyLogs('remediation-logs')">[COPY LOGS]</button>
+            </div>
             <div class="log-stream" id="remediation-logs" style="border-color: var(--accent-cyan); color: var(--accent-cyan);"></div>
         </div>
     </div>
@@ -111,6 +142,23 @@
             target.innerHTML += formattedMessage + "<br>";
             target.scrollTop = target.scrollHeight;
         };
+
+        // NEW: Copy to Clipboard Function
+        function copyLogs(targetId) {
+            const logDiv = document.getElementById(targetId);
+            // Replace HTML line breaks with actual newline characters for the clipboard
+            const textToCopy = logDiv.innerHTML.replace(/<br\s*[\/]?>/gi, "\n").replace(/<[^>]+>/g, '');
+            
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const btn = event.target;
+                const originalText = btn.innerText;
+                btn.innerText = "[COPIED!]";
+                setTimeout(() => { btn.innerText = originalText; }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+                alert("Failed to copy logs to clipboard.");
+            });
+        }
     </script>
 </body>
 </html>
