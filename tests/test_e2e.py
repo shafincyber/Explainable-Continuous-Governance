@@ -17,7 +17,8 @@ def test_e2e_pipeline():
         print("[+] Webhook accepted. Kafka event published.")
     except Exception as e:
         assert False, f"API Offline: {e}"
-	    print("[*] Awaiting Sovereign AI autonomous remediation (Timeout: 180s)...")
+        
+    print("[*] Awaiting Sovereign AI autonomous remediation (Timeout: 180s)...")
     patched = False
     for i in range(180):
         if os.path.exists(target_file):
